@@ -149,6 +149,10 @@ footer a { color: var(--orange-hi); font-weight: 700; text-decoration: none; }
   header { padding: 12px 16px; }
   .pl-big { font-size: 42px; }
   #acctSel { min-width: 0; width: 100%; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .seg button + button { border-left: 0; }
+  .seg button:nth-child(even) { border-left: 2px solid var(--white); }
+  .seg button:nth-child(n+3) { border-top: 2px solid var(--white); }
   #curve { height: 240px; }
 }
 </style>
@@ -206,6 +210,7 @@ footer a { color: var(--orange-hi); font-weight: 700; text-decoration: none; }
       <button type="button" data-v="all">All</button>
       <button type="button" data-v="options">Options only</button>
       <button type="button" data-v="stocks">Stocks only</button>
+      <button type="button" data-v="dividends">Dividends only</button>
     </div>
   </div>
   <div class="tb-sep"></div>
@@ -243,6 +248,16 @@ const fullMath = c => c.math + (c.cspMath ? '; ' + c.cspMath : '');
 const D = iso => TS.isoMdy(iso);
 const OPT = () => store.view === 'options';
 const STK = () => store.view === 'stocks';
+const DIV = () => store.view === 'dividends';
+// dividends & interest grouped for the Dividends-only view and its PDF
+function incomeStats(s) {
+  const inc = s.income.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const div = inc.filter(i => i.kind !== 'Interest'), intr = inc.filter(i => i.kind === 'Interest');
+  const grp = (arr, keyFn) => { const m = new Map(); arr.forEach(i => { const k = keyFn(i); if (!m.has(k)) m.set(k, { key: k, n: 0, t: 0, last: '' }); const g = m.get(k); g.n++; g.t += i.amount; if (i.date > g.last) g.last = i.date; }); return [...m.values()]; };
+  const bySym = grp(inc, i => i.symbol).sort((a, b) => b.t - a.t);
+  return { inc: inc, divTotal: div.reduce((t, i) => t + i.amount, 0), divN: div.length, intTotal: intr.reduce((t, i) => t + i.amount, 0), intN: intr.length,
+    bySym: bySym, byMonth: grp(inc, i => i.date.slice(0, 7)).sort((a, b) => a.key < b.key ? -1 : 1), top: bySym.filter(g => g.key !== 'Interest')[0] || null };
+}
 
 // ---------- storage (this browser only; Backup / Restore keeps a copy) ----------
 let store = load();
@@ -298,7 +313,7 @@ function renderAcctSel() {
   const one = sel.value !== ALL;
   $('btnRename').disabled = !one; $('btnDelete').disabled = !one;
   $('periodSel').value = store.period || 'all';
-  document.querySelectorAll('#viewSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === (OPT() ? 'options' : STK() ? 'stocks' : 'all')));
+  document.querySelectorAll('#viewSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === (OPT() ? 'options' : STK() ? 'stocks' : DIV() ? 'dividends' : 'all')));
   $('fromIn').value = store.from || ''; $('toIn').value = store.to || '';
   $('fromIn').classList.toggle('hide', store.period !== 'custom'); $('toIn').classList.toggle('hide', store.period !== 'custom');
 }
@@ -380,11 +395,16 @@ function refresh() {
   let h = '';
   // warnings
   const warn = [];
-  if (s.unmatchedOpt.length && !STK()) warn.push(s.unmatchedOpt.length + ' option closing trade(s) have no opening trade in the imported files (opened before the first statement) - they are not in the P/L. Import the older statement to include them: ' +
+  if (s.unmatchedOpt.length && !STK() && !DIV()) warn.push(s.unmatchedOpt.length + ' option closing trade(s) have no opening trade in the imported files (opened before the first statement) - they are not in the P/L. Import the older statement to include them: ' +
     s.unmatchedOpt.map(u => u.label + ' ' + D(u.time)).join(', '));
   s.notes.forEach(n => warn.push(n));
   if (warn.length) h += '<div class="warnbox">' + warn.map(w => '<div>&#9888; ' + esc(w) + '</div>').join('') + '</div>';
   h += heroHtml(s, label);
+  if (DIV()) {
+    h += '<div class="grid2">' + incomeHtml(s) + incomeMonthHtml(s) + '</div>' + paymentsHtml(s) + importsHtml(accts);
+    app.innerHTML = h;
+    return;
+  }
   if (STK()) {
     h += openHtml(s) + stocksHtml(s) + incomeHtml(s) + importsHtml(accts);
     app.innerHTML = h;
@@ -423,8 +443,43 @@ function stockHeroHtml(s, label) {
   h += tile('Stocks P/L with dividends', withInc, sumText([s.stockRealized, s.openStkPl, s.incomeTotal]) + ' (realized + open + dividends & interest)', true);
   return h + '</div></div>';
 }
+function divHeroHtml(s, label) {
+  const x = incomeStats(s);
+  let h = '<div class="panel hero"><div class="hero-main">';
+  h += '<div class="pl-label">DIVIDENDS &amp; INTEREST &mdash; ' + esc(activeName().toUpperCase()) + '</div>';
+  h += '<div class="pl-big ' + cls(s.incomeTotal) + '">' + U(s.incomeTotal, true) + '</div>';
+  h += '<div class="pl-sub c-up">Dividends ' + U(x.divTotal, true) + ' <span class="c-flat">&bull;</span> Interest ' + U(x.intTotal, true) + '</div>';
+  h += '<div class="pl-math">= ' + esc(sumText([x.divTotal, x.intTotal])) + ' (' + x.divN + ' dividend + ' + x.intN + ' interest payment' + (x.intN === 1 ? '' : 's') + ', Cash Balance DOI rows)</div>';
+  if (x.byMonth.length) h += '<div class="pl-math">Average per month: ' + U(s.incomeTotal) + ' / ' + x.byMonth.length + ' month' + (x.byMonth.length === 1 ? '' : 's') + ' with payments = ' + U(s.incomeTotal / x.byMonth.length, true) + '</div>';
+  h += '<div class="pl-period">' + esc(label) + '</div></div><div class="tiles">';
+  h += tile('Dividends', x.divTotal, x.divN + ' payments from ' + x.bySym.filter(g => g.key !== 'Interest').length + ' symbols');
+  h += tile('Interest', x.intTotal, x.intN + ' interest payment' + (x.intN === 1 ? '' : 's'));
+  h += '<div class="tile"><div class="k">Payments</div><div class="v c-flat">' + x.inc.length + '</div><div class="m">' + (x.inc.length ? esc(D(x.inc[0].date) + ' to ' + D(x.inc[x.inc.length - 1].date)) : 'none in this period') + '</div></div>';
+  if (x.top) h += tile('Top payer: ' + x.top.key, x.top.t, x.top.n + ' payments = ' + (s.incomeTotal ? (x.top.t / s.incomeTotal * 100).toFixed(1) : '0') + '% of the total (' + U(x.top.t) + ' / ' + U(s.incomeTotal) + ')', true);
+  return h + '</div></div>';
+}
+function incomeMonthHtml(s) {
+  const x = incomeStats(s);
+  let h = '<div class="panel"><h2>Dividends &amp; interest by month</h2>';
+  if (!x.byMonth.length) return h + '<div class="empty">No payments in this period.</div></div>';
+  h += '<div class="tbl-wrap"><table><thead><tr><th>Month</th><th class="num">Payments</th><th class="num">Total</th></tr></thead><tbody>';
+  x.byMonth.slice().reverse().forEach(g => { h += '<tr><td>' + monthName(g.key) + '</td><td class="num">' + g.n + '</td><td class="num c-up">' + U(g.t, true) + '</td></tr>'; });
+  h += '<tr class="tot"><td>TOTAL</td><td class="num">' + x.inc.length + '</td><td class="num ' + cls(s.incomeTotal) + '">' + U(s.incomeTotal, true) + '</td></tr>';
+  return h + '</tbody></table></div></div>';
+}
+function paymentsHtml(s) {
+  const x = incomeStats(s);
+  let h = '<div class="panel"><h2>Every payment (' + x.inc.length + ')</h2>';
+  if (!x.inc.length) return h + '<div class="empty">No payments in this period.</div></div>';
+  const multi = store.active === ALL && store.accounts.length > 1;
+  h += '<div class="tbl-wrap"><table><thead><tr><th>Date</th>' + (multi ? '<th>Account</th>' : '') + '<th>Paid by</th><th>Type</th><th class="num">Amount</th><th>Schwab description</th></tr></thead><tbody>';
+  x.inc.slice().reverse().forEach(i => { h += '<tr><td>' + D(i.date) + '</td>' + (multi ? '<td>' + esc(i.acct) + '</td>' : '') + '<td>' + esc(i.symbol) + '</td><td>' + esc(i.kind) + '</td><td class="num ' + cls(i.amount) + '">' + U(i.amount, true) + '</td><td class="math">' + esc(i.desc) + '</td></tr>'; });
+  h += '<tr class="tot"><td colspan="' + (multi ? 4 : 3) + '">TOTAL</td><td class="num ' + cls(s.incomeTotal) + '">' + U(s.incomeTotal, true) + '</td><td class="math">' + esc(sumText([x.divTotal, x.intTotal]) + ' (dividends + interest)') + '</td></tr>';
+  return h + '</tbody></table></div></div>';
+}
 function heroHtml(s, label) {
   if (STK()) return stockHeroHtml(s, label);
+  if (DIV()) return divHeroHtml(s, label);
   const o = s.opt;
   const big = s.optTotal;
   let h = '<div class="panel hero"><div class="hero-main">';
@@ -656,14 +711,14 @@ function exportCsv() {
   const q = v => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   const f2 = x => Number.isFinite(x) ? x.toFixed(2) : '';
   const rows = [['Status', 'Account', 'Asset', 'Contract', 'Symbol', 'Strategy', 'Qty', 'Opened', 'Closed', 'Open Price', 'Close / Mark', 'Days', 'P/L $', 'Worked Math', 'CSP Value $', 'Kept % of CSP', 'Received % of CSP', 'Annualized Kept %'].join(',')];
-  (OPT() ? s.optTrades : STK() ? s.stkTrades : s.optTrades.concat(s.stkTrades)).forEach(c => rows.push([c.how === 'expired' ? 'Expired' : 'Closed', c.acct, c.isOpt ? 'Option' : 'Stock', c.label, c.symbol, c.strat, c.qty,
+  (DIV() ? [] : OPT() ? s.optTrades : STK() ? s.stkTrades : s.optTrades.concat(s.stkTrades)).forEach(c => rows.push([c.how === 'expired' ? 'Expired' : 'Closed', c.acct, c.isOpt ? 'Option' : 'Stock', c.label, c.symbol, c.strat, c.qty,
     c.openTime.slice(0, 10), c.closeTime.slice(0, 10), c.openPrice, c.closePrice, c.days, f2(c.pl), fullMath(c),
     c.csp ? f2(c.csp) : '', c.csp ? (c.cspPct * 100).toFixed(2) : '', c.csp ? (c.cspRecvPct * 100).toFixed(2) : '', c.csp ? (c.cspAnn * 100).toFixed(2) : ''].map(q).join(',')));
-  if (!OPT()) s.schwabYtd.forEach(x => rows.push(['Closed (Schwab P/L YTD)', x.acct, 'Stock', x.symbol, x.symbol, 'Long Stock', x.qty, '', x.lastTime.slice(0, 10), '', '', '', f2(x.ytd), 'proceeds ' + f2(x.proceeds) + '; buy cost not in the file'].map(q).join(',')));
-  (OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk)).forEach(o => rows.push(['Open', o.acct, o.isOpt ? 'Option' : 'Stock', o.label, o.symbol, o.strat, o.qty, '', '', o.price, o.mark, '', f2(o.pl), o.math].map(q).join(',')));
+  if (!OPT() && !DIV()) s.schwabYtd.forEach(x => rows.push(['Closed (Schwab P/L YTD)', x.acct, 'Stock', x.symbol, x.symbol, 'Long Stock', x.qty, '', x.lastTime.slice(0, 10), '', '', '', f2(x.ytd), 'proceeds ' + f2(x.proceeds) + '; buy cost not in the file'].map(q).join(',')));
+  (DIV() ? [] : OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk)).forEach(o => rows.push(['Open', o.acct, o.isOpt ? 'Option' : 'Stock', o.label, o.symbol, o.strat, o.qty, '', '', o.price, o.mark, '', f2(o.pl), o.math].map(q).join(',')));
   if (!OPT()) s.income.forEach(i => rows.push(['Income', i.acct, i.kind, i.symbol, i.symbol, '', '', '', i.date, '', '', '', f2(i.amount), i.desc].map(q).join(',')));
   const blob = new Blob([rows.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
-  download(blob, 'FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : STK() ? '_Stocks' : '') + '_Trades_' + stamp() + '.csv');
+  download(blob, 'FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : STK() ? '_Stocks' : DIV() ? '_Dividends' : '') + '_Trades_' + stamp() + '.csv');
 }
 function fileTag() { return activeName().replace(/[^A-Za-z0-9]+/g, '') || 'Account'; }
 function download(blob, name) {
@@ -698,20 +753,29 @@ function pdfReport() {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
   const NAVY = [0, 43, 92], GREY = [68, 68, 68], LIGHT = [240, 240, 240], MID = [190, 190, 190], BLACK = [0, 0, 0], GREEN = [21, 128, 61], RED = [185, 28, 28];
-  const subtitle = activeName() + ' - ' + cur.label + (OPT() ? ' - Options only' : STK() ? ' - Stocks only' : '');
+  const subtitle = activeName() + ' - ' + cur.label + (OPT() ? ' - Options only' : STK() ? ' - Stocks only' : DIV() ? ' - Dividends only' : '');
   const nowTxt = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET';
   const pc = x => !Number.isFinite(x) || Math.abs(x) < 0.005 ? BLACK : x > 0 ? GREEN : RED;
 
   doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(...NAVY);
   doc.text(L1('F.O.C.U.S.© Options & Stocks Trade Summary'), 12, 16);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...GREY);
-  const by = doc.splitTextToSize(L1('Jachbit 2026 · ' + nowTxt + ' · ' + (OPT() ? o.n : STK() ? s.stkTrades.length + s.schwabYtd.length : o.n + s.stkTrades.length) + ' closed trades · ' + subtitle), W - 24);
+  const by = doc.splitTextToSize(L1('Jachbit 2026 · ' + nowTxt + ' · ' + (DIV() ? s.income.length + ' payments' : (OPT() ? o.n : STK() ? s.stkTrades.length + s.schwabYtd.length : o.n + s.stkTrades.length) + ' closed trades') + ' · ' + subtitle), W - 24);
   doc.text(by, 12, 22);
   let y = 22 + by.length * 4;
   doc.setDrawColor(...MID); doc.setLineWidth(0.4); doc.line(12, y, W - 12, y); y += 7;
   // big P/L
   const stTot = s.stockRealized + s.openStkPl, stInc = stTot + s.incomeTotal;
-  if (STK()) {
+  const ix = incomeStats(s);
+  if (DIV()) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...GREY); doc.text('DIVIDENDS & INTEREST', 12, y);
+    doc.setFontSize(26); doc.setTextColor(...pc(s.incomeTotal)); doc.text(L1(U(s.incomeTotal, true)), 12, y + 10);
+    doc.setFontSize(9); doc.setTextColor(...BLACK);
+    doc.text(doc.splitTextToSize(L1('= ' + sumText([ix.divTotal, ix.intTotal]) + ' (' + ix.divN + ' dividend + ' + ix.intN + ' interest payments)'), W - 90), 12, y + 16);
+    doc.setFontSize(10); doc.setTextColor(...GREY); doc.text('PAYMENTS', W - 70, y);
+    doc.setFontSize(20); doc.setTextColor(...BLACK); doc.text(String(ix.inc.length), W - 70, y + 9);
+    y += 26;
+  } else if (STK()) {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...GREY); doc.text('STOCKS & ETFs P/L', 12, y);
     doc.setFontSize(26); doc.setTextColor(...pc(stTot)); doc.text(L1(U(stTot, true)), 12, y + 10);
     doc.setFontSize(9); doc.setTextColor(...BLACK);
@@ -735,7 +799,7 @@ function pdfReport() {
   y += 26;
   }
   // chart
-  if (s.curve.length && !STK()) {
+  if (s.curve.length && !STK() && !DIV()) {
     const cv = document.createElement('canvas');
     drawCurve(cv, 'pdf', 900, 260);
     const iw = W - 24, ih = iw * 260 / 900;
@@ -747,7 +811,13 @@ function pdfReport() {
   const kvSpan = (k, v, m) => [{ content: L1(k), colSpan: 2, styles: { fontStyle: 'bold' } }, plCell(v), { content: L1(m), colSpan: 6 }];
   const body = [];
   body.push(sec('Summary - every number with its math'));
-  if (STK()) {
+  if (DIV()) {
+    body.push(kvSpan('Dividends', ix.divTotal, ix.divN + ' payments'));
+    body.push(kvSpan('Interest', ix.intTotal, ix.intN + ' payments'));
+    body.push(kvSpan('DIVIDENDS & INTEREST', s.incomeTotal, sumText([ix.divTotal, ix.intTotal])));
+    if (ix.byMonth.length) body.push(kvSpan('Average per month', s.incomeTotal / ix.byMonth.length, U(s.incomeTotal) + ' / ' + ix.byMonth.length + ' months with payments'));
+    if (ix.top) body.push(kvSpan('Top payer: ' + ix.top.key, ix.top.t, ix.top.n + ' payments = ' + (s.incomeTotal ? (ix.top.t / s.incomeTotal * 100).toFixed(1) : '0') + '% of the total'));
+  } else if (STK()) {
     body.push(kvSpan('Stocks / ETFs realized', s.stockRealized, U(s.stk.total, true) + ' matched ' + P(s.schwabYtdTotal) + ' Schwab P/L YTD (buys older than the file)'));
     body.push(kvSpan('Stocks / ETFs open', s.openStkPl, s.openStk.map(x => x.label + ' ' + x.math).join('; ') || 'none'));
     body.push(kvSpan('STOCKS & ETFs P/L', stTot, sumText([s.stockRealized, s.openStkPl]) + ' (realized + open)'));
@@ -766,7 +836,7 @@ function pdfReport() {
   body.push(kvSpan('NET ACCOUNT P/L', s.net, sumText([o.total, s.openOptPl, s.stockRealized, s.openStkPl, s.incomeTotal, s.feesTotal])));
   }
   }
-  if (!STK()) {
+  if (!STK() && !DIV()) {
   body.push(sec('Options statistics'));
   [['Win rate', pct(o.winRate) + '  (' + o.wins + ' / ' + o.n + ')'], ['Profit factor', Number.isFinite(o.pf) ? o.pf.toFixed(2) + '  (' + U(o.grossWin) + ' / ' + U(-o.grossLoss) + ')' : '-'],
     ['Avg win / avg loss', U(o.avgWin, true) + ' / ' + U(o.avgLoss, true)], ['Expectancy per trade', U(o.expectancy, true) + '  (' + U(o.total, true) + ' / ' + o.n + ')'],
@@ -786,12 +856,12 @@ function pdfReport() {
   body.push(['Closed', 'Opened', 'Contract', 'Strategy', 'Qty', 'Open', 'Close', { content: 'P/L', styles: { halign: 'right' } }, 'Worked math'].map(t => typeof t === 'string' ? { content: t, styles: { fontStyle: 'bold', textColor: NAVY } } : Object.assign(t, { styles: Object.assign(t.styles, { fontStyle: 'bold', textColor: NAVY }) })));
   s.optTrades.slice().reverse().forEach(c => body.push([D(c.closeTime) + (c.how === 'expired' ? ' exp' : ''), D(c.openTime), L1(c.label), L1(c.strat), String(c.qty), TS.px(c.openPrice), TS.px(c.closePrice), plCell(c.pl), L1(fullMath(c))]));
   }
-  const openRows = OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk);
+  const openRows = DIV() ? [] : OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk);
   if (openRows.length) {
     body.push(sec('Open positions (latest statement marks)'));
     openRows.forEach(x => body.push([{ content: L1(x.label), colSpan: 2 }, L1(x.strat), String(x.qty), TS.px(x.price), TS.px(x.mark), { content: L1(U(x.value)) }, plCell(x.pl), L1(x.math)]));
   }
-  if (!OPT() && (s.stkTrades.length || s.schwabYtd.length)) {
+  if (!OPT() && !DIV() && (s.stkTrades.length || s.schwabYtd.length)) {
     body.push(sec('Stocks & ETFs closed'));
     s.stkTrades.forEach(c => body.push([D(c.closeTime), { content: L1(c.symbol), colSpan: 2 }, String(c.qty), { content: '', colSpan: 3 }, plCell(c.pl), L1(c.math)]));
     s.schwabYtd.forEach(x => body.push([D(x.lastTime), { content: L1(x.symbol), colSpan: 2 }, String(x.qty), { content: L1('proceeds ' + U(x.proceeds)), colSpan: 3 }, plCell(x.ytd), L1('buy cost not in the file -> Schwab P/L YTD (' + D(x.asOf) + ')')]));
@@ -800,6 +870,12 @@ function pdfReport() {
     body.push(sec('Dividends & interest'));
     const m = new Map(); s.income.forEach(i => { if (!m.has(i.symbol)) m.set(i.symbol, { n: 0, t: 0 }); const g = m.get(i.symbol); g.n++; g.t += i.amount; });
     [...m.entries()].sort((a, b) => b[1].t - a[1].t).forEach(([k, g]) => body.push([{ content: L1(k), colSpan: 3, styles: { fontStyle: 'bold' } }, { content: g.n + ' payments', colSpan: 4 }, plCell(g.t), '']));
+  }
+  if (DIV() && ix.inc.length) {
+    body.push(sec('By month'));
+    ix.byMonth.slice().reverse().forEach(g => body.push([{ content: L1(monthName(g.key)), colSpan: 3, styles: { fontStyle: 'bold' } }, { content: g.n + ' payments', colSpan: 4 }, plCell(g.t), '']));
+    body.push(sec('Every payment'));
+    ix.inc.slice().reverse().forEach(i => body.push([D(i.date), { content: L1(i.symbol), colSpan: 2 }, { content: L1(i.kind), colSpan: 4 }, plCell(i.amount), L1(i.desc)]));
   }
   doc.autoTable({
     startY: y, body: body,
@@ -826,7 +902,7 @@ function pdfReport() {
       doc.text(L1('© 2026 Jachbit. All rights reserved. May not be copied or shared without express written consent of the publisher.  linktr.ee/jachbit'), W / 2, H - 7, { align: 'center' });
     }
   });
-  doc.save('FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : STK() ? '_Stocks' : '') + '_' + stamp() + '.pdf');
+  doc.save('FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : STK() ? '_Stocks' : DIV() ? '_Dividends' : '') + '_' + stamp() + '.pdf');
 }
 
 // ---------- header clock + GoatCounter (public Pages URL only) ----------
