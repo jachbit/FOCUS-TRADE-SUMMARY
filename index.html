@@ -204,6 +204,7 @@ footer a { color: var(--orange-hi); font-weight: 700; text-decoration: none; }
     <div class="seg" id="viewSeg" role="group" aria-label="View">
       <button type="button" data-v="all">All</button>
       <button type="button" data-v="options">Options only</button>
+      <button type="button" data-v="stocks">Stocks only</button>
     </div>
   </div>
   <div class="tb-sep"></div>
@@ -238,6 +239,7 @@ const cls = x => !Number.isFinite(x) || Math.abs(x) < 0.005 ? 'c-flat' : x > 0 ?
 const pct = x => Number.isFinite(x) ? (x * 100).toFixed(1) + '%' : '-';
 const D = iso => TS.isoMdy(iso);
 const OPT = () => store.view === 'options';
+const STK = () => store.view === 'stocks';
 
 // ---------- storage (this browser only; Backup / Restore keeps a copy) ----------
 let store = load();
@@ -293,7 +295,7 @@ function renderAcctSel() {
   const one = sel.value !== ALL;
   $('btnRename').disabled = !one; $('btnDelete').disabled = !one;
   $('periodSel').value = store.period || 'all';
-  document.querySelectorAll('#viewSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === (OPT() ? 'options' : 'all')));
+  document.querySelectorAll('#viewSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === (OPT() ? 'options' : STK() ? 'stocks' : 'all')));
   $('fromIn').value = store.from || ''; $('toIn').value = store.to || '';
   $('fromIn').classList.toggle('hide', store.period !== 'custom'); $('toIn').classList.toggle('hide', store.period !== 'custom');
 }
@@ -375,11 +377,16 @@ function refresh() {
   let h = '';
   // warnings
   const warn = [];
-  if (s.unmatchedOpt.length) warn.push(s.unmatchedOpt.length + ' option closing trade(s) have no opening trade in the imported files (opened before the first statement) - they are not in the P/L. Import the older statement to include them: ' +
+  if (s.unmatchedOpt.length && !STK()) warn.push(s.unmatchedOpt.length + ' option closing trade(s) have no opening trade in the imported files (opened before the first statement) - they are not in the P/L. Import the older statement to include them: ' +
     s.unmatchedOpt.map(u => u.label + ' ' + D(u.time)).join(', '));
   s.notes.forEach(n => warn.push(n));
   if (warn.length) h += '<div class="warnbox">' + warn.map(w => '<div>&#9888; ' + esc(w) + '</div>').join('') + '</div>';
   h += heroHtml(s, label);
+  if (STK()) {
+    h += openHtml(s) + stocksHtml(s) + incomeHtml(s) + importsHtml(accts);
+    app.innerHTML = h;
+    return;
+  }
   h += '<div class="grid2">' + statsHtml(s) + chartPanel() + '</div>';
   h += closedHtml(s);
   h += openHtml(s);
@@ -397,7 +404,24 @@ function refresh() {
 function tile(k, v, m, strong) {
   return '<div class="tile' + (strong ? ' strong' : '') + '"><div class="k">' + esc(k) + '</div><div class="v ' + cls(v) + '">' + U(v, true) + '</div><div class="m">' + esc(m) + '</div></div>';
 }
+function stockHeroHtml(s, label) {
+  const tot = s.stockRealized + s.openStkPl, withInc = tot + s.incomeTotal;
+  let h = '<div class="panel hero"><div class="hero-main">';
+  h += '<div class="pl-label">STOCKS &amp; ETFs P/L &mdash; ' + esc(activeName().toUpperCase()) + '</div>';
+  h += '<div class="pl-big ' + cls(tot) + '">' + U(tot, true) + '</div>';
+  h += '<div class="pl-sub ' + cls(s.stockRealized) + '">Realized ' + U(s.stockRealized, true) + ' <span class="c-flat">&bull;</span> <span class="' + cls(s.openStkPl) + '">Open ' + U(s.openStkPl, true) + '</span></div>';
+  h += '<div class="pl-math">= ' + U(s.stockRealized, true) + ' realized ' + P(s.openStkPl) + ' open (' + s.openStk.length + ' position' + (s.openStk.length === 1 ? '' : 's') + ' at the statement mark)</div>';
+  h += '<div class="pl-math">With dividends &amp; interest: ' + esc(sumText([tot, s.incomeTotal])) + ' = <span class="' + cls(withInc) + '">' + U(withInc, true) + '</span></div>';
+  h += '<div class="pl-period">' + esc(label) + '</div></div><div class="tiles">';
+  h += tile('Stocks / ETFs realized', s.stockRealized, (s.stk.n ? U(s.stk.total, true) + ' matched trades' : '') + (s.stk.n && s.schwabYtd.length ? ' ' : '') +
+    (s.schwabYtd.length ? (s.stk.n ? P(s.schwabYtdTotal) : U(s.schwabYtdTotal, true)) + ' Schwab P/L YTD (' + s.schwabYtd.length + ' symbols bought before the file)' : '') + (!s.stk.n && !s.schwabYtd.length ? 'no stock sales' : ''));
+  h += tile('Stocks / ETFs open', s.openStkPl, s.openStk.length ? s.openStk.map(x => x.label + ' ' + U(x.pl, true)).join(', ') : 'no open stock positions');
+  h += tile('Dividends & interest', s.incomeTotal, s.income.length + ' payments in the Cash Balance');
+  h += tile('Stocks P/L with dividends', withInc, sumText([s.stockRealized, s.openStkPl, s.incomeTotal]) + ' (realized + open + dividends & interest)', true);
+  return h + '</div></div>';
+}
 function heroHtml(s, label) {
+  if (STK()) return stockHeroHtml(s, label);
   const o = s.opt;
   const big = s.optTotal;
   let h = '<div class="panel hero"><div class="hero-main">';
@@ -479,9 +503,10 @@ function closedHtml(s) {
   return h + '</tbody></table></div></div>';
 }
 function openHtml(s) {
-  const all = OPT() ? s.openOpt : s.openOpt.concat(s.openStk);
-  let h = '<div class="panel"><h2>Open ' + (OPT() ? 'option ' : '') + 'positions (' + all.length + ')</h2>';
-  if (!all.length) return h + '<div class="empty">No open ' + (OPT() ? 'option ' : '') + 'positions in the latest statement.</div></div>';
+  const all = OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk);
+  const kind = OPT() ? 'option ' : STK() ? 'stock ' : '';
+  let h = '<div class="panel"><h2>Open ' + kind + 'positions (' + all.length + ')</h2>';
+  if (!all.length) return h + '<div class="empty">No open ' + kind + 'positions in the latest statement.</div></div>';
   const asOf = [...new Set(all.map(x => x.asOf))].map(D).join(', ');
   h += '<div class="note">From the Equities / Options lists of the latest statement (as of ' + esc(asOf) + '). Marks are from that day - import a newer statement to update them.</div>';
   h += '<div class="tbl-wrap"><table><thead><tr><th>Position</th><th>Strategy</th><th class="num">Qty</th><th class="num">Trade price</th><th class="num">Mark</th><th class="num">Mark value</th><th class="num">DTE</th><th class="num">Open P/L</th><th>Worked math</th></tr></thead><tbody>';
@@ -490,8 +515,8 @@ function openHtml(s) {
       '<td class="num">' + TS.px(x.mark) + '</td><td class="num">' + U(x.value) + '</td><td class="num">' + (Number.isFinite(x.dte) ? x.dte : '') + '</td>' +
       '<td class="num ' + cls(x.pl) + '">' + U(x.pl, true) + '</td><td class="math">' + esc(x.math) + '</td></tr>';
   });
-  const tot = OPT() ? s.openOptPl : s.openOptPl + s.openStkPl;
-  h += '<tr class="tot"><td colspan="7">TOTAL open P/L</td><td class="num ' + cls(tot) + '">' + U(tot, true) + '</td><td class="math">' + esc(OPT() ? s.openOpt.length + ' option position' + (s.openOpt.length === 1 ? '' : 's') : U(s.openOptPl, true) + ' options ' + P(s.openStkPl) + ' stocks') + '</td></tr>';
+  const tot = OPT() ? s.openOptPl : STK() ? s.openStkPl : s.openOptPl + s.openStkPl;
+  h += '<tr class="tot"><td colspan="7">TOTAL open P/L</td><td class="num ' + cls(tot) + '">' + U(tot, true) + '</td><td class="math">' + esc(OPT() || STK() ? all.length + ' ' + kind + 'position' + (all.length === 1 ? '' : 's') : U(s.openOptPl, true) + ' options ' + P(s.openStkPl) + ' stocks') + '</td></tr>';
   return h + '</tbody></table></div></div>';
 }
 function checkMap(s) { const m = {}; s.check.forEach(c => { m[c.symbol] = c; }); return m; }
@@ -617,13 +642,13 @@ function exportCsv() {
   const q = v => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   const f2 = x => Number.isFinite(x) ? x.toFixed(2) : '';
   const rows = [['Status', 'Account', 'Asset', 'Contract', 'Symbol', 'Strategy', 'Qty', 'Opened', 'Closed', 'Open Price', 'Close / Mark', 'Days', 'P/L $', 'Worked Math'].join(',')];
-  (OPT() ? s.optTrades : s.optTrades.concat(s.stkTrades)).forEach(c => rows.push([c.how === 'expired' ? 'Expired' : 'Closed', c.acct, c.isOpt ? 'Option' : 'Stock', c.label, c.symbol, c.strat, c.qty,
+  (OPT() ? s.optTrades : STK() ? s.stkTrades : s.optTrades.concat(s.stkTrades)).forEach(c => rows.push([c.how === 'expired' ? 'Expired' : 'Closed', c.acct, c.isOpt ? 'Option' : 'Stock', c.label, c.symbol, c.strat, c.qty,
     c.openTime.slice(0, 10), c.closeTime.slice(0, 10), c.openPrice, c.closePrice, c.days, f2(c.pl), c.math].map(q).join(',')));
   if (!OPT()) s.schwabYtd.forEach(x => rows.push(['Closed (Schwab P/L YTD)', x.acct, 'Stock', x.symbol, x.symbol, 'Long Stock', x.qty, '', x.lastTime.slice(0, 10), '', '', '', f2(x.ytd), 'proceeds ' + f2(x.proceeds) + '; buy cost not in the file'].map(q).join(',')));
-  (OPT() ? s.openOpt : s.openOpt.concat(s.openStk)).forEach(o => rows.push(['Open', o.acct, o.isOpt ? 'Option' : 'Stock', o.label, o.symbol, o.strat, o.qty, '', '', o.price, o.mark, '', f2(o.pl), o.math].map(q).join(',')));
+  (OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk)).forEach(o => rows.push(['Open', o.acct, o.isOpt ? 'Option' : 'Stock', o.label, o.symbol, o.strat, o.qty, '', '', o.price, o.mark, '', f2(o.pl), o.math].map(q).join(',')));
   if (!OPT()) s.income.forEach(i => rows.push(['Income', i.acct, i.kind, i.symbol, i.symbol, '', '', '', i.date, '', '', '', f2(i.amount), i.desc].map(q).join(',')));
   const blob = new Blob([rows.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
-  download(blob, 'FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : '') + '_Trades_' + stamp() + '.csv');
+  download(blob, 'FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : STK() ? '_Stocks' : '') + '_Trades_' + stamp() + '.csv');
 }
 function fileTag() { return activeName().replace(/[^A-Za-z0-9]+/g, '') || 'Account'; }
 function download(blob, name) {
@@ -658,18 +683,28 @@ function pdfReport() {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
   const NAVY = [0, 43, 92], GREY = [68, 68, 68], LIGHT = [240, 240, 240], MID = [190, 190, 190], BLACK = [0, 0, 0], GREEN = [21, 128, 61], RED = [185, 28, 28];
-  const subtitle = activeName() + ' - ' + cur.label + (OPT() ? ' - Options only' : '');
+  const subtitle = activeName() + ' - ' + cur.label + (OPT() ? ' - Options only' : STK() ? ' - Stocks only' : '');
   const nowTxt = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET';
   const pc = x => !Number.isFinite(x) || Math.abs(x) < 0.005 ? BLACK : x > 0 ? GREEN : RED;
 
   doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(...NAVY);
   doc.text(L1('F.O.C.U.S.© Options & Stocks Trade Summary'), 12, 16);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...GREY);
-  const by = doc.splitTextToSize(L1('Jachbit 2026 · ' + nowTxt + ' · ' + (o.n + (OPT() ? 0 : s.stkTrades.length)) + ' closed trades · ' + subtitle), W - 24);
+  const by = doc.splitTextToSize(L1('Jachbit 2026 · ' + nowTxt + ' · ' + (OPT() ? o.n : STK() ? s.stkTrades.length + s.schwabYtd.length : o.n + s.stkTrades.length) + ' closed trades · ' + subtitle), W - 24);
   doc.text(by, 12, 22);
   let y = 22 + by.length * 4;
   doc.setDrawColor(...MID); doc.setLineWidth(0.4); doc.line(12, y, W - 12, y); y += 7;
   // big P/L
+  const stTot = s.stockRealized + s.openStkPl, stInc = stTot + s.incomeTotal;
+  if (STK()) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...GREY); doc.text('STOCKS & ETFs P/L', 12, y);
+    doc.setFontSize(26); doc.setTextColor(...pc(stTot)); doc.text(L1(U(stTot, true)), 12, y + 10);
+    doc.setFontSize(9); doc.setTextColor(...BLACK);
+    doc.text(doc.splitTextToSize(L1('= ' + U(s.stockRealized, true) + ' realized ' + P(s.openStkPl) + ' open (' + s.openStk.length + ' position' + (s.openStk.length === 1 ? '' : 's') + ' at the statement mark).'), W - 90), 12, y + 16);
+    doc.setFontSize(10); doc.setTextColor(...GREY); doc.text('WITH DIVIDENDS & INTEREST', W - 70, y);
+    doc.setFontSize(20); doc.setTextColor(...pc(stInc)); doc.text(L1(U(stInc, true)), W - 70, y + 9);
+    y += 26;
+  } else {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...GREY); doc.text('OPTIONS P/L', 12, y);
   doc.setFontSize(26); doc.setTextColor(...pc(s.optTotal)); doc.text(L1(U(s.optTotal, true)), 12, y + 10);
   doc.setFontSize(9); doc.setTextColor(...BLACK);
@@ -683,8 +718,9 @@ function pdfReport() {
     doc.setFontSize(20); doc.setTextColor(...pc(s.net)); doc.text(L1(U(s.net, true)), W - 70, y + 9);
   }
   y += 26;
+  }
   // chart
-  if (s.curve.length) {
+  if (s.curve.length && !STK()) {
     const cv = document.createElement('canvas');
     drawCurve(cv, 'pdf', 900, 260);
     const iw = W - 24, ih = iw * 260 / 900;
@@ -696,6 +732,13 @@ function pdfReport() {
   const kvSpan = (k, v, m) => [{ content: L1(k), colSpan: 2, styles: { fontStyle: 'bold' } }, plCell(v), { content: L1(m), colSpan: 6 }];
   const body = [];
   body.push(sec('Summary - every number with its math'));
+  if (STK()) {
+    body.push(kvSpan('Stocks / ETFs realized', s.stockRealized, U(s.stk.total, true) + ' matched ' + P(s.schwabYtdTotal) + ' Schwab P/L YTD (buys older than the file)'));
+    body.push(kvSpan('Stocks / ETFs open', s.openStkPl, s.openStk.map(x => x.label + ' ' + x.math).join('; ') || 'none'));
+    body.push(kvSpan('STOCKS & ETFs P/L', stTot, sumText([s.stockRealized, s.openStkPl]) + ' (realized + open)'));
+    body.push(kvSpan('Dividends & interest', s.incomeTotal, s.income.length + ' payments'));
+    body.push(kvSpan('WITH DIVIDENDS & INTEREST', stInc, sumText([stTot, s.incomeTotal])));
+  } else {
   body.push(kvSpan('Options realized', o.total, U(o.grossWin, true) + ' wins ' + P(o.grossLoss) + ' losses (' + o.n + ' trades)'));
   body.push(kvSpan('Options open', s.openOptPl, s.openOpt.map(x => x.label + ' ' + x.math).join('; ') || 'none'));
   if (OPT()) {
@@ -707,13 +750,15 @@ function pdfReport() {
   body.push(kvSpan('Fees & commissions', s.feesTotal, s.fees.length ? s.fees.length + ' cash rows' : 'none listed in this export'));
   body.push(kvSpan('NET ACCOUNT P/L', s.net, sumText([o.total, s.openOptPl, s.stockRealized, s.openStkPl, s.incomeTotal, s.feesTotal])));
   }
+  }
+  if (!STK()) {
   body.push(sec('Options statistics'));
   [['Win rate', pct(o.winRate) + '  (' + o.wins + ' / ' + o.n + ')'], ['Profit factor', Number.isFinite(o.pf) ? o.pf.toFixed(2) + '  (' + U(o.grossWin) + ' / ' + U(-o.grossLoss) + ')' : '-'],
     ['Avg win / avg loss', U(o.avgWin, true) + ' / ' + U(o.avgLoss, true)], ['Expectancy per trade', U(o.expectancy, true) + '  (' + U(o.total, true) + ' / ' + o.n + ')'],
     ['Best / worst', (o.best ? o.best.label + ' ' + U(o.best.pl, true) : '-') + '  /  ' + (o.worst ? o.worst.label + ' ' + U(o.worst.pl, true) : '-')],
     ['Avg days held', Number.isFinite(o.avgDays) ? o.avgDays.toFixed(1) : '-'], ['Premium paid / sold', U(s.premPaid) + ' / ' + U(s.premSold)]]
     .forEach(([k, v]) => body.push([{ content: L1(k), colSpan: 3, styles: { fontStyle: 'bold' } }, { content: L1(v), colSpan: 6 }]));
-  const grp = (title, rows, fmt) => {
+  var grp = (title, rows, fmt) => {
     if (!rows.length) return;
     body.push(sec(title));
     rows.forEach(g => body.push([{ content: L1(fmt ? fmt(g.key) : g.key), colSpan: 3, styles: { fontStyle: 'bold' } }, { content: g.n + ' trades', colSpan: 2 }, { content: g.wins + ' W / ' + g.losses + ' L', colSpan: 2 }, { content: pct(g.winRate) }, plCell(g.total)]));
@@ -722,7 +767,8 @@ function pdfReport() {
   body.push(sec('Closed option trades (FIFO)'));
   body.push(['Closed', 'Opened', 'Contract', 'Strategy', 'Qty', 'Open', 'Close', { content: 'P/L', styles: { halign: 'right' } }, 'Worked math'].map(t => typeof t === 'string' ? { content: t, styles: { fontStyle: 'bold', textColor: NAVY } } : Object.assign(t, { styles: Object.assign(t.styles, { fontStyle: 'bold', textColor: NAVY }) })));
   s.optTrades.slice().reverse().forEach(c => body.push([D(c.closeTime) + (c.how === 'expired' ? ' exp' : ''), D(c.openTime), L1(c.label), L1(c.strat), String(c.qty), TS.px(c.openPrice), TS.px(c.closePrice), plCell(c.pl), L1(c.math)]));
-  const openRows = OPT() ? s.openOpt : s.openOpt.concat(s.openStk);
+  }
+  const openRows = OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk);
   if (openRows.length) {
     body.push(sec('Open positions (latest statement marks)'));
     openRows.forEach(x => body.push([{ content: L1(x.label), colSpan: 2 }, L1(x.strat), String(x.qty), TS.px(x.price), TS.px(x.mark), { content: L1(U(x.value)) }, plCell(x.pl), L1(x.math)]));
@@ -762,7 +808,7 @@ function pdfReport() {
       doc.text(L1('© 2026 Jachbit. All rights reserved. May not be copied or shared without express written consent of the publisher.  linktr.ee/jachbit'), W / 2, H - 7, { align: 'center' });
     }
   });
-  doc.save('FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : '') + '_' + stamp() + '.pdf');
+  doc.save('FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : STK() ? '_Stocks' : '') + '_' + stamp() + '.pdf');
 }
 
 // ---------- header clock + GoatCounter (public Pages URL only) ----------
