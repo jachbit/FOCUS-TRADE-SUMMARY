@@ -13,6 +13,7 @@ Import a Schwab / thinkorswim **Account Statement CSV** and get a trade-by-trade
 ## What it shows
 - Big **Options P/L** (realized + open) with win rate, and tiles for options realized/open, stocks realized/open, dividends & interest, fees and net account P/L - each with its worked math.
 - Running-total chart of realized option P/L, statistics (profit factor, avg win/loss, expectancy, best/worst, days held).
+- Cash-secured puts: CSP value = strike x 100 x contracts; each closed short put shows the premium kept after close / CSP value and the premium received / CSP value, plus the totals for all CSPs (table, statistics, PDF, CSV).
 - Closed option trades (FIFO, sortable, math on every row), open positions, by underlying (with a check against Schwab's own P/L YTD), by strategy, by month, dividends, stock/ETF sales, import history.
 
 ## Notes

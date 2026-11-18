@@ -120,6 +120,7 @@ tr:nth-child(even) td { background: rgba(255,255,255,.025); }
 tr.tot td { border-top: 2px solid var(--orange); background: var(--card2); }
 .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--white); white-space: nowrap; }
 .tag.exp { border-color: var(--yellow); color: var(--yellow); }
+.sub2 { font-size: 12px; font-weight: 700; color: var(--bluegrey); white-space: nowrap; }
 .ok { color: var(--green); } .bad { color: var(--red); }
 .empty { font-size: 15px; font-weight: 700; color: var(--white); padding: 6px 0; }
 .warnbox { background: #2a1f05; border: 1px solid var(--yellow); border-left: 6px solid var(--yellow); border-radius: 8px; padding: 9px 12px; margin-bottom: 14px; font-size: 14px; font-weight: 700; color: var(--yellow); }
@@ -237,6 +238,8 @@ const P = x => (x < -0.004 ? '- ' : '+ ') + TS.usd(Math.abs(x));
 const sumText = arr => arr.map((v, i) => i ? P(v) : U(v, true)).join(' ');
 const cls = x => !Number.isFinite(x) || Math.abs(x) < 0.005 ? 'c-flat' : x > 0 ? 'c-up' : 'c-down';
 const pct = x => Number.isFinite(x) ? (x * 100).toFixed(1) + '%' : '-';
+const pct2 = x => Number.isFinite(x) ? (x * 100).toFixed(2) + '%' : '-';
+const fullMath = c => c.math + (c.cspMath ? '; ' + c.cspMath : '');
 const D = iso => TS.isoMdy(iso);
 const OPT = () => store.view === 'options';
 const STK = () => store.view === 'stocks';
@@ -437,6 +440,8 @@ function heroHtml(s, label) {
     h += tile('Gross wins', o.grossWin, o.wins + ' winning trade' + (o.wins === 1 ? '' : 's') + (o.wins ? ', avg ' + U(o.avgWin, true) + ' (' + U(o.grossWin) + ' / ' + o.wins + ')' : ''));
     h += tile('Gross losses', o.grossLoss, o.losses + ' losing trade' + (o.losses === 1 ? '' : 's') + (o.losses ? ', avg ' + U(o.avgLoss, true) + ' (' + U(o.grossLoss) + ' / ' + o.losses + ')' : ''));
     h += tile('Expectancy / trade', o.expectancy, o.n ? U(o.total, true) + ' realized / ' + o.n + ' trades' : 'no closed trades', true);
+    if (s.csp.n) h += '<div class="tile"><div class="k">CSP return (kept / CSP value)</div><div class="v ' + cls(s.csp.kept) + '">' + pct2(s.csp.pctKept) + '</div><div class="m">' +
+      esc(U(s.csp.kept, true) + ' kept / ' + U(s.csp.value) + ' CSP value (' + s.csp.n + ' put' + (s.csp.n === 1 ? '' : 's') + '); received ' + U(s.csp.received) + ' = ' + pct2(s.csp.pctRecv)) + '</div></div>';
     return h + '</div></div>';
   }
   h += tile('Stocks / ETFs realized', s.stockRealized, (s.stk.n ? U(s.stk.total, true) + ' matched trades' : '') + (s.stk.n && s.schwabYtd.length ? ' + ' : '') +
@@ -466,6 +471,10 @@ function statsHtml(s) {
   h += stat('Premium sold (shorts)', U(s.premSold), 'opening price x qty x 100');
   h += stat('Return on premium paid', s.premPaid > 0 ? pct(s.optTrades.filter(c => c.dir > 0).reduce((t, c) => t + c.pl, 0) / s.premPaid) : '-',
     s.premPaid > 0 ? U(s.optTrades.filter(c => c.dir > 0).reduce((t, c) => t + c.pl, 0), true) + ' long P/L / ' + U(s.premPaid) : '');
+  if (s.csp.n) {
+    h += stat('CSP return (kept)', pct2(s.csp.pctKept), U(s.csp.kept, true) + ' kept / ' + U(s.csp.value) + ' CSP value', cls(s.csp.kept));
+    h += stat('CSP premium received', pct2(s.csp.pctRecv), U(s.csp.received) + ' received / ' + U(s.csp.value) + ' CSP value');
+  }
   return h + '</div></div>';
 }
 function chartPanel() {
@@ -475,7 +484,7 @@ function chartPanel() {
 
 const COLS = [
   ['closeTime', 'Closed'], ['openTime', 'Opened'], ['acct', 'Account'], ['label', 'Contract'], ['strat', 'Strategy'], ['qty', 'Qty', 1], ['openPrice', 'Open', 1],
-  ['closePrice', 'Close', 1], ['days', 'Days', 1], ['pl', 'P/L', 1], ['math', 'Worked math']
+  ['closePrice', 'Close', 1], ['days', 'Days', 1], ['pl', 'P/L', 1], ['cspPct', '% of CSP', 1], ['math', 'Worked math']
 ];
 function closedHtml(s) {
   const rows = s.optTrades.slice().sort((x, y) => {
@@ -495,10 +504,14 @@ function closedHtml(s) {
     h += '<tr><td>' + D(c.closeTime) + (c.how === 'expired' ? ' <span class="tag exp">expired</span>' : '') + '</td><td>' + D(c.openTime) + '</td>' +
       (multi ? '<td>' + esc(c.acct) + '</td>' : '') + '<td>' + esc(c.label) + '</td><td>' + esc(c.strat) + '</td><td class="num">' + c.qty + '</td>' +
       '<td class="num">' + TS.px(c.openPrice) + '</td><td class="num">' + TS.px(c.closePrice) + '</td><td class="num">' + c.days + '</td>' +
-      '<td class="num ' + cls(c.pl) + '">' + U(c.pl, true) + '</td><td class="math">' + esc(c.math) + '</td></tr>';
+      '<td class="num ' + cls(c.pl) + '">' + U(c.pl, true) + '</td>' +
+      '<td class="num">' + (c.csp ? '<span class="' + cls(c.pl) + '">' + pct2(c.cspPct) + '</span><div class="sub2">rcvd ' + pct2(c.cspRecvPct) + '</div>' : '') + '</td>' +
+      '<td class="math">' + esc(fullMath(c)) + '</td></tr>';
   });
   const span = multi ? 9 : 8;
-  h += '<tr class="tot"><td colspan="' + span + '">TOTAL realized options P/L (' + rows.length + ' trades)</td><td class="num ' + cls(s.opt.total) + '">' + U(s.opt.total, true) + '</td><td class="math">' +
+  h += '<tr class="tot"><td colspan="' + span + '">TOTAL realized options P/L (' + rows.length + ' trades)</td><td class="num ' + cls(s.opt.total) + '">' + U(s.opt.total, true) + '</td>' +
+    '<td class="num">' + (s.csp.n ? '<span class="' + cls(s.csp.kept) + '">' + pct2(s.csp.pctKept) + '</span><div class="sub2">rcvd ' + pct2(s.csp.pctRecv) + '</div>' : '') + '</td><td class="math">' +
+    (s.csp.n ? esc('CSPs: ' + U(s.csp.kept, true) + ' kept / ' + U(s.csp.value) + ' = ' + pct2(s.csp.pctKept) + '; ' + U(s.csp.received) + ' received / ' + U(s.csp.value) + ' = ' + pct2(s.csp.pctRecv)) + '<br>' : '') +
     esc(U(s.opt.grossWin, true) + ' from ' + s.opt.wins + ' wins ' + P(s.opt.grossLoss) + ' from ' + s.opt.losses + ' losses') + '</td></tr>';
   return h + '</tbody></table></div></div>';
 }
@@ -641,9 +654,10 @@ function exportCsv() {
   const s = cur.s;
   const q = v => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   const f2 = x => Number.isFinite(x) ? x.toFixed(2) : '';
-  const rows = [['Status', 'Account', 'Asset', 'Contract', 'Symbol', 'Strategy', 'Qty', 'Opened', 'Closed', 'Open Price', 'Close / Mark', 'Days', 'P/L $', 'Worked Math'].join(',')];
+  const rows = [['Status', 'Account', 'Asset', 'Contract', 'Symbol', 'Strategy', 'Qty', 'Opened', 'Closed', 'Open Price', 'Close / Mark', 'Days', 'P/L $', 'Worked Math', 'CSP Value $', 'Kept % of CSP', 'Received % of CSP'].join(',')];
   (OPT() ? s.optTrades : STK() ? s.stkTrades : s.optTrades.concat(s.stkTrades)).forEach(c => rows.push([c.how === 'expired' ? 'Expired' : 'Closed', c.acct, c.isOpt ? 'Option' : 'Stock', c.label, c.symbol, c.strat, c.qty,
-    c.openTime.slice(0, 10), c.closeTime.slice(0, 10), c.openPrice, c.closePrice, c.days, f2(c.pl), c.math].map(q).join(',')));
+    c.openTime.slice(0, 10), c.closeTime.slice(0, 10), c.openPrice, c.closePrice, c.days, f2(c.pl), fullMath(c),
+    c.csp ? f2(c.csp) : '', c.csp ? (c.cspPct * 100).toFixed(2) : '', c.csp ? (c.cspRecvPct * 100).toFixed(2) : ''].map(q).join(',')));
   if (!OPT()) s.schwabYtd.forEach(x => rows.push(['Closed (Schwab P/L YTD)', x.acct, 'Stock', x.symbol, x.symbol, 'Long Stock', x.qty, '', x.lastTime.slice(0, 10), '', '', '', f2(x.ytd), 'proceeds ' + f2(x.proceeds) + '; buy cost not in the file'].map(q).join(',')));
   (OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk)).forEach(o => rows.push(['Open', o.acct, o.isOpt ? 'Option' : 'Stock', o.label, o.symbol, o.strat, o.qty, '', '', o.price, o.mark, '', f2(o.pl), o.math].map(q).join(',')));
   if (!OPT()) s.income.forEach(i => rows.push(['Income', i.acct, i.kind, i.symbol, i.symbol, '', '', '', i.date, '', '', '', f2(i.amount), i.desc].map(q).join(',')));
@@ -757,6 +771,8 @@ function pdfReport() {
     ['Avg win / avg loss', U(o.avgWin, true) + ' / ' + U(o.avgLoss, true)], ['Expectancy per trade', U(o.expectancy, true) + '  (' + U(o.total, true) + ' / ' + o.n + ')'],
     ['Best / worst', (o.best ? o.best.label + ' ' + U(o.best.pl, true) : '-') + '  /  ' + (o.worst ? o.worst.label + ' ' + U(o.worst.pl, true) : '-')],
     ['Avg days held', Number.isFinite(o.avgDays) ? o.avgDays.toFixed(1) : '-'], ['Premium paid / sold', U(s.premPaid) + ' / ' + U(s.premSold)]]
+    .concat(s.csp.n ? [['CSP return (kept / CSP value)', pct2(s.csp.pctKept) + '  (' + U(s.csp.kept, true) + ' / ' + U(s.csp.value) + ', ' + s.csp.n + ' puts)'],
+      ['CSP premium received / CSP value', pct2(s.csp.pctRecv) + '  (' + U(s.csp.received) + ' / ' + U(s.csp.value) + ')']] : [])
     .forEach(([k, v]) => body.push([{ content: L1(k), colSpan: 3, styles: { fontStyle: 'bold' } }, { content: L1(v), colSpan: 6 }]));
   var grp = (title, rows, fmt) => {
     if (!rows.length) return;
@@ -766,7 +782,7 @@ function pdfReport() {
   grp('By underlying', s.byUnderlying); grp('By strategy', s.byStrat); grp('By month', s.byMonth, monthName);
   body.push(sec('Closed option trades (FIFO)'));
   body.push(['Closed', 'Opened', 'Contract', 'Strategy', 'Qty', 'Open', 'Close', { content: 'P/L', styles: { halign: 'right' } }, 'Worked math'].map(t => typeof t === 'string' ? { content: t, styles: { fontStyle: 'bold', textColor: NAVY } } : Object.assign(t, { styles: Object.assign(t.styles, { fontStyle: 'bold', textColor: NAVY }) })));
-  s.optTrades.slice().reverse().forEach(c => body.push([D(c.closeTime) + (c.how === 'expired' ? ' exp' : ''), D(c.openTime), L1(c.label), L1(c.strat), String(c.qty), TS.px(c.openPrice), TS.px(c.closePrice), plCell(c.pl), L1(c.math)]));
+  s.optTrades.slice().reverse().forEach(c => body.push([D(c.closeTime) + (c.how === 'expired' ? ' exp' : ''), D(c.openTime), L1(c.label), L1(c.strat), String(c.qty), TS.px(c.openPrice), TS.px(c.closePrice), plCell(c.pl), L1(fullMath(c))]));
   }
   const openRows = OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk);
   if (openRows.length) {

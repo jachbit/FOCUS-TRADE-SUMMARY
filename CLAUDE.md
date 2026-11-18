@@ -9,3 +9,4 @@
 - NEVER commit statements, exports or backups (.gitignore blocks *.csv, *.json, *.pdf) - they are personal account data.
 - Rules: every number shows its math; min 12px, no dim text; jsPDF text Latin-1 only (`L1()`); CSV export name `FOCUS_TradeSummary_<Account>_Trades_<stamp>.csv`; PDF subtitle = account + period.
 - Before edits: run `backup_all.bat`. Local preview: `start.bat` (port 8137, PORT_REGISTRY.md).
+- CSP % (addCsp in ts-engine.js): short PUT closes only. CSP value = strike x 100 x qty; kept % = P/L / CSP value; received % = open price x qty x 100 / CSP value; totals = sums over the period's CSPs.

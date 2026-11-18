@@ -238,8 +238,21 @@
         if (f) fees.push(Object.assign({ acct: acct.name }, c, { fee: f }));
       });
     });
+    closed.forEach(addCsp);
     closed.sort((a, b) => a.closeTime < b.closeTime ? -1 : a.closeTime > b.closeTime ? 1 : 0);
     return { closed: closed, open: open, unmatched: unmatched, notes: notes, income: income, fees: fees, plRows: plRows };
+  }
+
+  // Cash-secured put: the cash set aside = strike x 100 x contracts
+  function addCsp(c) {
+    if (!(c.isOpt && c.type === 'PUT' && c.dir < 0 && c.strike > 0)) return;
+    c.csp = c.strike * 100 * c.qty;
+    c.cspRecv = c.openPrice * c.qty * 100;
+    c.cspPct = c.pl / c.csp;
+    c.cspRecvPct = c.cspRecv / c.csp;
+    c.cspMath = 'CSP value ' + (Number.isInteger(c.strike) ? c.strike : px(c.strike)) + ' x 100 x ' + c.qty + ' = ' + usd(c.csp) +
+      '; kept ' + usd(c.pl, true) + ' / ' + usd(c.csp) + ' = ' + (c.cspPct * 100).toFixed(2) + '%' +
+      '; received ' + px(c.openPrice) + ' x ' + c.qty + ' x 100 = ' + usd(c.cspRecv) + ' / ' + usd(c.csp) + ' = ' + (c.cspRecvPct * 100).toFixed(2) + '%';
   }
 
   function incomeSymbol(desc) {
@@ -304,6 +317,10 @@
       unmatchedOpt: unOpt, notes: a.notes, plRows: a.plRows
     };
     o.optTotal = o.opt.total + o.openOptPl;
+    const csp = opt.filter(c => c.csp > 0);
+    o.csp = { n: csp.length, value: csp.reduce((t, c) => t + c.csp, 0), received: csp.reduce((t, c) => t + c.cspRecv, 0), kept: csp.reduce((t, c) => t + c.pl, 0) };
+    o.csp.pctKept = o.csp.value > 0 ? o.csp.kept / o.csp.value : NaN;
+    o.csp.pctRecv = o.csp.value > 0 ? o.csp.received / o.csp.value : NaN;
     o.stockRealized = o.stk.total + o.schwabYtdTotal;
     o.net = o.opt.total + o.openOptPl + o.stockRealized + o.openStkPl + o.incomeTotal + o.feesTotal;
     o.premSold = opt.filter(c => c.dir < 0).reduce((s, c) => s + c.openPrice * c.qty * 100, 0);
