@@ -7,6 +7,7 @@ Import a Schwab / thinkorswim **Account Statement CSV** and get a trade-by-trade
 2. Open the page, click **Import Schwab CSV**. A new account is made from the statement's account number (or click **New** first to name one).
 3. Import newer statements any time - trades that are already in are skipped, so overlapping dates are fine.
 4. Pick an account or **All accounts**, and a period (All, YTD, this month, last month, last 30 days, custom).
+   **View: Options only** shows just your options P/L (no stock, dividend, fee or net account figures) - the PDF and CSV follow the view.
 5. **Export CSV**, **PDF report**, **Backup** (JSON of all accounts) / **Restore** on another computer.
 
 ## What it shows
