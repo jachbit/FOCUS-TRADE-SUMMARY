@@ -250,9 +250,12 @@
     c.cspRecv = c.openPrice * c.qty * 100;
     c.cspPct = c.pl / c.csp;
     c.cspRecvPct = c.cspRecv / c.csp;
+    c.cspDays = Math.max(c.days, 1);                 // opened and closed the same day = 1 day
+    c.cspAnn = c.cspPct * 365 / c.cspDays;           // simple (not compounded)
     c.cspMath = 'CSP value ' + (Number.isInteger(c.strike) ? c.strike : px(c.strike)) + ' x 100 x ' + c.qty + ' = ' + usd(c.csp) +
       '; kept ' + usd(c.pl, true) + ' / ' + usd(c.csp) + ' = ' + (c.cspPct * 100).toFixed(2) + '%' +
-      '; received ' + px(c.openPrice) + ' x ' + c.qty + ' x 100 = ' + usd(c.cspRecv) + ' / ' + usd(c.csp) + ' = ' + (c.cspRecvPct * 100).toFixed(2) + '%';
+      '; received ' + px(c.openPrice) + ' x ' + c.qty + ' x 100 = ' + usd(c.cspRecv) + ' / ' + usd(c.csp) + ' = ' + (c.cspRecvPct * 100).toFixed(2) + '%' +
+      '; annualized ' + usd(c.pl, true) + ' / ' + usd(c.csp) + ' x 365 / ' + c.cspDays + ' day' + (c.cspDays === 1 ? '' : 's') + (c.days < 1 ? ' (same day = 1)' : '') + ' = ' + (c.cspAnn * 100).toFixed(2) + '%';
   }
 
   function incomeSymbol(desc) {
@@ -321,6 +324,11 @@
     o.csp = { n: csp.length, value: csp.reduce((t, c) => t + c.csp, 0), received: csp.reduce((t, c) => t + c.cspRecv, 0), kept: csp.reduce((t, c) => t + c.pl, 0) };
     o.csp.pctKept = o.csp.value > 0 ? o.csp.kept / o.csp.value : NaN;
     o.csp.pctRecv = o.csp.value > 0 ? o.csp.received / o.csp.value : NaN;
+    // annualized total weighted by dollar-days: kept / sum(CSP value x days held) x 365
+    o.csp.dollarDays = csp.reduce((t, c) => t + c.csp * c.cspDays, 0);
+    o.csp.ann = o.csp.dollarDays > 0 ? o.csp.kept / o.csp.dollarDays * 365 : NaN;
+    o.csp.annMath = usd(o.csp.kept, true) + ' / (' + csp.map(c => usd(c.csp) + ' x ' + c.cspDays).join(' + ') + ' = ' + usd(o.csp.dollarDays) + ' dollar-days) x 365 = ' +
+      (Number.isFinite(o.csp.ann) ? (o.csp.ann * 100).toFixed(2) + '%' : '-');
     o.stockRealized = o.stk.total + o.schwabYtdTotal;
     o.net = o.opt.total + o.openOptPl + o.stockRealized + o.openStkPl + o.incomeTotal + o.feesTotal;
     o.premSold = opt.filter(c => c.dir < 0).reduce((s, c) => s + c.openPrice * c.qty * 100, 0);

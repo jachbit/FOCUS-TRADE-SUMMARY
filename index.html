@@ -441,7 +441,7 @@ function heroHtml(s, label) {
     h += tile('Gross losses', o.grossLoss, o.losses + ' losing trade' + (o.losses === 1 ? '' : 's') + (o.losses ? ', avg ' + U(o.avgLoss, true) + ' (' + U(o.grossLoss) + ' / ' + o.losses + ')' : ''));
     h += tile('Expectancy / trade', o.expectancy, o.n ? U(o.total, true) + ' realized / ' + o.n + ' trades' : 'no closed trades', true);
     if (s.csp.n) h += '<div class="tile"><div class="k">CSP return (kept / CSP value)</div><div class="v ' + cls(s.csp.kept) + '">' + pct2(s.csp.pctKept) + '</div><div class="m">' +
-      esc(U(s.csp.kept, true) + ' kept / ' + U(s.csp.value) + ' CSP value (' + s.csp.n + ' put' + (s.csp.n === 1 ? '' : 's') + '); received ' + U(s.csp.received) + ' = ' + pct2(s.csp.pctRecv)) + '</div></div>';
+      esc(U(s.csp.kept, true) + ' kept / ' + U(s.csp.value) + ' CSP value (' + s.csp.n + ' put' + (s.csp.n === 1 ? '' : 's') + '); received ' + U(s.csp.received) + ' = ' + pct2(s.csp.pctRecv) + '; annualized ' + pct2(s.csp.ann) + ' by days held') + '</div></div>';
     return h + '</div></div>';
   }
   h += tile('Stocks / ETFs realized', s.stockRealized, (s.stk.n ? U(s.stk.total, true) + ' matched trades' : '') + (s.stk.n && s.schwabYtd.length ? ' + ' : '') +
@@ -474,6 +474,7 @@ function statsHtml(s) {
   if (s.csp.n) {
     h += stat('CSP return (kept)', pct2(s.csp.pctKept), U(s.csp.kept, true) + ' kept / ' + U(s.csp.value) + ' CSP value', cls(s.csp.kept));
     h += stat('CSP premium received', pct2(s.csp.pctRecv), U(s.csp.received) + ' received / ' + U(s.csp.value) + ' CSP value');
+    h += stat('CSP return annualized', pct2(s.csp.ann), s.csp.annMath + ' (simple, by days held)', cls(s.csp.kept));
   }
   return h + '</div></div>';
 }
@@ -505,13 +506,13 @@ function closedHtml(s) {
       (multi ? '<td>' + esc(c.acct) + '</td>' : '') + '<td>' + esc(c.label) + '</td><td>' + esc(c.strat) + '</td><td class="num">' + c.qty + '</td>' +
       '<td class="num">' + TS.px(c.openPrice) + '</td><td class="num">' + TS.px(c.closePrice) + '</td><td class="num">' + c.days + '</td>' +
       '<td class="num ' + cls(c.pl) + '">' + U(c.pl, true) + '</td>' +
-      '<td class="num">' + (c.csp ? '<span class="' + cls(c.pl) + '">' + pct2(c.cspPct) + '</span><div class="sub2">rcvd ' + pct2(c.cspRecvPct) + '</div>' : '') + '</td>' +
+      '<td class="num">' + (c.csp ? '<span class="' + cls(c.pl) + '">' + pct2(c.cspPct) + '</span><div class="sub2">rcvd ' + pct2(c.cspRecvPct) + '</div><div class="sub2">ann ' + pct2(c.cspAnn) + '</div>' : '') + '</td>' +
       '<td class="math">' + esc(fullMath(c)) + '</td></tr>';
   });
   const span = multi ? 9 : 8;
   h += '<tr class="tot"><td colspan="' + span + '">TOTAL realized options P/L (' + rows.length + ' trades)</td><td class="num ' + cls(s.opt.total) + '">' + U(s.opt.total, true) + '</td>' +
-    '<td class="num">' + (s.csp.n ? '<span class="' + cls(s.csp.kept) + '">' + pct2(s.csp.pctKept) + '</span><div class="sub2">rcvd ' + pct2(s.csp.pctRecv) + '</div>' : '') + '</td><td class="math">' +
-    (s.csp.n ? esc('CSPs: ' + U(s.csp.kept, true) + ' kept / ' + U(s.csp.value) + ' = ' + pct2(s.csp.pctKept) + '; ' + U(s.csp.received) + ' received / ' + U(s.csp.value) + ' = ' + pct2(s.csp.pctRecv)) + '<br>' : '') +
+    '<td class="num">' + (s.csp.n ? '<span class="' + cls(s.csp.kept) + '">' + pct2(s.csp.pctKept) + '</span><div class="sub2">rcvd ' + pct2(s.csp.pctRecv) + '</div><div class="sub2">ann ' + pct2(s.csp.ann) + '</div>' : '') + '</td><td class="math">' +
+    (s.csp.n ? esc('CSPs: ' + U(s.csp.kept, true) + ' kept / ' + U(s.csp.value) + ' = ' + pct2(s.csp.pctKept) + '; ' + U(s.csp.received) + ' received / ' + U(s.csp.value) + ' = ' + pct2(s.csp.pctRecv) + '; annualized ' + s.csp.annMath) + '<br>' : '') +
     esc(U(s.opt.grossWin, true) + ' from ' + s.opt.wins + ' wins ' + P(s.opt.grossLoss) + ' from ' + s.opt.losses + ' losses') + '</td></tr>';
   return h + '</tbody></table></div></div>';
 }
@@ -654,10 +655,10 @@ function exportCsv() {
   const s = cur.s;
   const q = v => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   const f2 = x => Number.isFinite(x) ? x.toFixed(2) : '';
-  const rows = [['Status', 'Account', 'Asset', 'Contract', 'Symbol', 'Strategy', 'Qty', 'Opened', 'Closed', 'Open Price', 'Close / Mark', 'Days', 'P/L $', 'Worked Math', 'CSP Value $', 'Kept % of CSP', 'Received % of CSP'].join(',')];
+  const rows = [['Status', 'Account', 'Asset', 'Contract', 'Symbol', 'Strategy', 'Qty', 'Opened', 'Closed', 'Open Price', 'Close / Mark', 'Days', 'P/L $', 'Worked Math', 'CSP Value $', 'Kept % of CSP', 'Received % of CSP', 'Annualized Kept %'].join(',')];
   (OPT() ? s.optTrades : STK() ? s.stkTrades : s.optTrades.concat(s.stkTrades)).forEach(c => rows.push([c.how === 'expired' ? 'Expired' : 'Closed', c.acct, c.isOpt ? 'Option' : 'Stock', c.label, c.symbol, c.strat, c.qty,
     c.openTime.slice(0, 10), c.closeTime.slice(0, 10), c.openPrice, c.closePrice, c.days, f2(c.pl), fullMath(c),
-    c.csp ? f2(c.csp) : '', c.csp ? (c.cspPct * 100).toFixed(2) : '', c.csp ? (c.cspRecvPct * 100).toFixed(2) : ''].map(q).join(',')));
+    c.csp ? f2(c.csp) : '', c.csp ? (c.cspPct * 100).toFixed(2) : '', c.csp ? (c.cspRecvPct * 100).toFixed(2) : '', c.csp ? (c.cspAnn * 100).toFixed(2) : ''].map(q).join(',')));
   if (!OPT()) s.schwabYtd.forEach(x => rows.push(['Closed (Schwab P/L YTD)', x.acct, 'Stock', x.symbol, x.symbol, 'Long Stock', x.qty, '', x.lastTime.slice(0, 10), '', '', '', f2(x.ytd), 'proceeds ' + f2(x.proceeds) + '; buy cost not in the file'].map(q).join(',')));
   (OPT() ? s.openOpt : STK() ? s.openStk : s.openOpt.concat(s.openStk)).forEach(o => rows.push(['Open', o.acct, o.isOpt ? 'Option' : 'Stock', o.label, o.symbol, o.strat, o.qty, '', '', o.price, o.mark, '', f2(o.pl), o.math].map(q).join(',')));
   if (!OPT()) s.income.forEach(i => rows.push(['Income', i.acct, i.kind, i.symbol, i.symbol, '', '', '', i.date, '', '', '', f2(i.amount), i.desc].map(q).join(',')));
@@ -772,7 +773,8 @@ function pdfReport() {
     ['Best / worst', (o.best ? o.best.label + ' ' + U(o.best.pl, true) : '-') + '  /  ' + (o.worst ? o.worst.label + ' ' + U(o.worst.pl, true) : '-')],
     ['Avg days held', Number.isFinite(o.avgDays) ? o.avgDays.toFixed(1) : '-'], ['Premium paid / sold', U(s.premPaid) + ' / ' + U(s.premSold)]]
     .concat(s.csp.n ? [['CSP return (kept / CSP value)', pct2(s.csp.pctKept) + '  (' + U(s.csp.kept, true) + ' / ' + U(s.csp.value) + ', ' + s.csp.n + ' puts)'],
-      ['CSP premium received / CSP value', pct2(s.csp.pctRecv) + '  (' + U(s.csp.received) + ' / ' + U(s.csp.value) + ')']] : [])
+      ['CSP premium received / CSP value', pct2(s.csp.pctRecv) + '  (' + U(s.csp.received) + ' / ' + U(s.csp.value) + ')'],
+      ['CSP return annualized (by days held)', pct2(s.csp.ann) + '  = ' + s.csp.annMath]] : [])
     .forEach(([k, v]) => body.push([{ content: L1(k), colSpan: 3, styles: { fontStyle: 'bold' } }, { content: L1(v), colSpan: 6 }]));
   var grp = (title, rows, fmt) => {
     if (!rows.length) return;
