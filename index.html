@@ -65,6 +65,11 @@ input, select { font-size: 16px; font-weight: 700; padding: 8px 9px; background:
 input:focus, select:focus { outline: none; border-color: var(--orange); }
 input[type=date] { color-scheme: dark; }
 #acctSel { min-width: 220px; }
+.seg { display: inline-flex; border: 2px solid var(--white); border-radius: 8px; overflow: hidden; }
+.seg button { font-size: 15px; font-weight: 700; padding: 8px 14px; border: 0; background: var(--navy); color: var(--white); cursor: pointer; white-space: nowrap; font-family: inherit; }
+.seg button + button { border-left: 2px solid var(--white); }
+.seg button.on { background: var(--orange); }
+.seg button:hover { filter: brightness(1.2); }
 #status { padding: 8px 24px; font-size: 14px; font-weight: 700; color: var(--yellow); background: #0a1628; border-bottom: 1px solid var(--border); }
 #status:empty { display: none; }
 .hide { display: none !important; }
@@ -194,6 +199,13 @@ footer a { color: var(--orange-hi); font-weight: 700; text-decoration: none; }
     <input type="date" id="fromIn" class="hide" aria-label="From date">
     <input type="date" id="toIn" class="hide" aria-label="To date">
   </div>
+  <div class="tb-group">
+    <span class="tb-label">View</span>
+    <div class="seg" id="viewSeg" role="group" aria-label="View">
+      <button type="button" data-v="all">All</button>
+      <button type="button" data-v="options">Options only</button>
+    </div>
+  </div>
   <div class="tb-sep"></div>
   <div class="tb-group">
     <button class="btn" id="btnCsv" type="button">Export CSV</button>
@@ -225,12 +237,13 @@ const sumText = arr => arr.map((v, i) => i ? P(v) : U(v, true)).join(' ');
 const cls = x => !Number.isFinite(x) || Math.abs(x) < 0.005 ? 'c-flat' : x > 0 ? 'c-up' : 'c-down';
 const pct = x => Number.isFinite(x) ? (x * 100).toFixed(1) + '%' : '-';
 const D = iso => TS.isoMdy(iso);
+const OPT = () => store.view === 'options';
 
 // ---------- storage (this browser only; Backup / Restore keeps a copy) ----------
 let store = load();
 function load() {
   try { const v = JSON.parse(localStorage.getItem(LS)); if (v && Array.isArray(v.accounts)) return v; } catch (e) {}
-  return { accounts: [], active: ALL, period: 'all', from: '', to: '' };
+  return { accounts: [], active: ALL, period: 'all', from: '', to: '', view: 'all' };
 }
 function save() {
   try { localStorage.setItem(LS, JSON.stringify(store)); }
@@ -280,6 +293,7 @@ function renderAcctSel() {
   const one = sel.value !== ALL;
   $('btnRename').disabled = !one; $('btnDelete').disabled = !one;
   $('periodSel').value = store.period || 'all';
+  document.querySelectorAll('#viewSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === (OPT() ? 'options' : 'all')));
   $('fromIn').value = store.from || ''; $('toIn').value = store.to || '';
   $('fromIn').classList.toggle('hide', store.period !== 'custom'); $('toIn').classList.toggle('hide', store.period !== 'custom');
 }
@@ -370,8 +384,11 @@ function refresh() {
   h += closedHtml(s);
   h += openHtml(s);
   h += '<div class="grid2">' + groupHtml('By underlying', s.byUnderlying, 'Symbol', checkMap(s)) + groupHtml('By strategy', s.byStrat, 'Strategy') + '</div>';
-  h += '<div class="grid2">' + groupHtml('By month (closed)', s.byMonth.slice().reverse(), 'Month') + incomeHtml(s) + '</div>';
-  h += stocksHtml(s);
+  if (OPT()) h += groupHtml('By month (closed)', s.byMonth.slice().reverse(), 'Month');
+  else {
+    h += '<div class="grid2">' + groupHtml('By month (closed)', s.byMonth.slice().reverse(), 'Month') + incomeHtml(s) + '</div>';
+    h += stocksHtml(s);
+  }
   h += importsHtml(accts);
   app.innerHTML = h;
   drawCurve();
@@ -392,6 +409,12 @@ function heroHtml(s, label) {
   h += '<div class="pl-period">' + esc(label) + '</div></div><div class="tiles">';
   h += tile('Options realized', o.total, U(o.grossWin, true) + ' wins ' + P(o.grossLoss) + ' losses');
   h += tile('Options open', s.openOptPl, s.openOpt.length ? s.openOpt.map(x => x.label + ' ' + U(x.pl, true)).join(', ') : 'no open option positions');
+  if (OPT()) {
+    h += tile('Gross wins', o.grossWin, o.wins + ' winning trade' + (o.wins === 1 ? '' : 's') + (o.wins ? ', avg ' + U(o.avgWin, true) + ' (' + U(o.grossWin) + ' / ' + o.wins + ')' : ''));
+    h += tile('Gross losses', o.grossLoss, o.losses + ' losing trade' + (o.losses === 1 ? '' : 's') + (o.losses ? ', avg ' + U(o.avgLoss, true) + ' (' + U(o.grossLoss) + ' / ' + o.losses + ')' : ''));
+    h += tile('Expectancy / trade', o.expectancy, o.n ? U(o.total, true) + ' realized / ' + o.n + ' trades' : 'no closed trades', true);
+    return h + '</div></div>';
+  }
   h += tile('Stocks / ETFs realized', s.stockRealized, (s.stk.n ? U(s.stk.total, true) + ' matched trades' : '') + (s.stk.n && s.schwabYtd.length ? ' + ' : '') +
     (s.schwabYtd.length ? U(s.schwabYtdTotal, true) + ' Schwab P/L YTD (' + s.schwabYtd.length + ' symbols bought before the file)' : '') + (!s.stk.n && !s.schwabYtd.length ? 'no stock sales' : ''));
   h += tile('Stocks / ETFs open', s.openStkPl, s.openStk.length ? s.openStk.map(x => x.label + ' ' + U(x.pl, true)).join(', ') : 'no open stock positions');
@@ -456,9 +479,9 @@ function closedHtml(s) {
   return h + '</tbody></table></div></div>';
 }
 function openHtml(s) {
-  const all = s.openOpt.concat(s.openStk);
-  let h = '<div class="panel"><h2>Open positions (' + all.length + ')</h2>';
-  if (!all.length) return h + '<div class="empty">No open positions in the latest statement.</div></div>';
+  const all = OPT() ? s.openOpt : s.openOpt.concat(s.openStk);
+  let h = '<div class="panel"><h2>Open ' + (OPT() ? 'option ' : '') + 'positions (' + all.length + ')</h2>';
+  if (!all.length) return h + '<div class="empty">No open ' + (OPT() ? 'option ' : '') + 'positions in the latest statement.</div></div>';
   const asOf = [...new Set(all.map(x => x.asOf))].map(D).join(', ');
   h += '<div class="note">From the Equities / Options lists of the latest statement (as of ' + esc(asOf) + '). Marks are from that day - import a newer statement to update them.</div>';
   h += '<div class="tbl-wrap"><table><thead><tr><th>Position</th><th>Strategy</th><th class="num">Qty</th><th class="num">Trade price</th><th class="num">Mark</th><th class="num">Mark value</th><th class="num">DTE</th><th class="num">Open P/L</th><th>Worked math</th></tr></thead><tbody>';
@@ -467,8 +490,8 @@ function openHtml(s) {
       '<td class="num">' + TS.px(x.mark) + '</td><td class="num">' + U(x.value) + '</td><td class="num">' + (Number.isFinite(x.dte) ? x.dte : '') + '</td>' +
       '<td class="num ' + cls(x.pl) + '">' + U(x.pl, true) + '</td><td class="math">' + esc(x.math) + '</td></tr>';
   });
-  const tot = s.openOptPl + s.openStkPl;
-  h += '<tr class="tot"><td colspan="7">TOTAL open P/L</td><td class="num ' + cls(tot) + '">' + U(tot, true) + '</td><td class="math">' + esc(U(s.openOptPl, true) + ' options ' + P(s.openStkPl) + ' stocks') + '</td></tr>';
+  const tot = OPT() ? s.openOptPl : s.openOptPl + s.openStkPl;
+  h += '<tr class="tot"><td colspan="7">TOTAL open P/L</td><td class="num ' + cls(tot) + '">' + U(tot, true) + '</td><td class="math">' + esc(OPT() ? s.openOpt.length + ' option position' + (s.openOpt.length === 1 ? '' : 's') : U(s.openOptPl, true) + ' options ' + P(s.openStkPl) + ' stocks') + '</td></tr>';
   return h + '</tbody></table></div></div>';
 }
 function checkMap(s) { const m = {}; s.check.forEach(c => { m[c.symbol] = c; }); return m; }
@@ -594,13 +617,13 @@ function exportCsv() {
   const q = v => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   const f2 = x => Number.isFinite(x) ? x.toFixed(2) : '';
   const rows = [['Status', 'Account', 'Asset', 'Contract', 'Symbol', 'Strategy', 'Qty', 'Opened', 'Closed', 'Open Price', 'Close / Mark', 'Days', 'P/L $', 'Worked Math'].join(',')];
-  s.optTrades.concat(s.stkTrades).forEach(c => rows.push([c.how === 'expired' ? 'Expired' : 'Closed', c.acct, c.isOpt ? 'Option' : 'Stock', c.label, c.symbol, c.strat, c.qty,
+  (OPT() ? s.optTrades : s.optTrades.concat(s.stkTrades)).forEach(c => rows.push([c.how === 'expired' ? 'Expired' : 'Closed', c.acct, c.isOpt ? 'Option' : 'Stock', c.label, c.symbol, c.strat, c.qty,
     c.openTime.slice(0, 10), c.closeTime.slice(0, 10), c.openPrice, c.closePrice, c.days, f2(c.pl), c.math].map(q).join(',')));
-  s.schwabYtd.forEach(x => rows.push(['Closed (Schwab P/L YTD)', x.acct, 'Stock', x.symbol, x.symbol, 'Long Stock', x.qty, '', x.lastTime.slice(0, 10), '', '', '', f2(x.ytd), 'proceeds ' + f2(x.proceeds) + '; buy cost not in the file'].map(q).join(',')));
-  s.openOpt.concat(s.openStk).forEach(o => rows.push(['Open', o.acct, o.isOpt ? 'Option' : 'Stock', o.label, o.symbol, o.strat, o.qty, '', '', o.price, o.mark, '', f2(o.pl), o.math].map(q).join(',')));
-  s.income.forEach(i => rows.push(['Income', i.acct, i.kind, i.symbol, i.symbol, '', '', '', i.date, '', '', '', f2(i.amount), i.desc].map(q).join(',')));
+  if (!OPT()) s.schwabYtd.forEach(x => rows.push(['Closed (Schwab P/L YTD)', x.acct, 'Stock', x.symbol, x.symbol, 'Long Stock', x.qty, '', x.lastTime.slice(0, 10), '', '', '', f2(x.ytd), 'proceeds ' + f2(x.proceeds) + '; buy cost not in the file'].map(q).join(',')));
+  (OPT() ? s.openOpt : s.openOpt.concat(s.openStk)).forEach(o => rows.push(['Open', o.acct, o.isOpt ? 'Option' : 'Stock', o.label, o.symbol, o.strat, o.qty, '', '', o.price, o.mark, '', f2(o.pl), o.math].map(q).join(',')));
+  if (!OPT()) s.income.forEach(i => rows.push(['Income', i.acct, i.kind, i.symbol, i.symbol, '', '', '', i.date, '', '', '', f2(i.amount), i.desc].map(q).join(',')));
   const blob = new Blob([rows.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
-  download(blob, 'FOCUS_TradeSummary_' + fileTag() + '_Trades_' + stamp() + '.csv');
+  download(blob, 'FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : '') + '_Trades_' + stamp() + '.csv');
 }
 function fileTag() { return activeName().replace(/[^A-Za-z0-9]+/g, '') || 'Account'; }
 function download(blob, name) {
@@ -635,14 +658,14 @@ function pdfReport() {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
   const NAVY = [0, 43, 92], GREY = [68, 68, 68], LIGHT = [240, 240, 240], MID = [190, 190, 190], BLACK = [0, 0, 0], GREEN = [21, 128, 61], RED = [185, 28, 28];
-  const subtitle = activeName() + ' - ' + cur.label;
+  const subtitle = activeName() + ' - ' + cur.label + (OPT() ? ' - Options only' : '');
   const nowTxt = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET';
   const pc = x => !Number.isFinite(x) || Math.abs(x) < 0.005 ? BLACK : x > 0 ? GREEN : RED;
 
   doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(...NAVY);
   doc.text(L1('F.O.C.U.S.© Options & Stocks Trade Summary'), 12, 16);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...GREY);
-  const by = doc.splitTextToSize(L1('Jachbit 2026 · ' + nowTxt + ' · ' + (o.n + s.stkTrades.length) + ' closed trades · ' + subtitle), W - 24);
+  const by = doc.splitTextToSize(L1('Jachbit 2026 · ' + nowTxt + ' · ' + (o.n + (OPT() ? 0 : s.stkTrades.length)) + ' closed trades · ' + subtitle), W - 24);
   doc.text(by, 12, 22);
   let y = 22 + by.length * 4;
   doc.setDrawColor(...MID); doc.setLineWidth(0.4); doc.line(12, y, W - 12, y); y += 7;
@@ -652,8 +675,13 @@ function pdfReport() {
   doc.setFontSize(9); doc.setTextColor(...BLACK);
   doc.text(doc.splitTextToSize(L1('= ' + U(o.total, true) + ' realized on ' + o.n + ' closed trades ' + P(s.openOptPl) + ' open (' + s.openOpt.length + ' position' + (s.openOpt.length === 1 ? '' : 's') + ' at the statement mark).  ' +
     o.wins + ' wins / ' + o.losses + ' losses = ' + pct(o.winRate) + ' win rate.'), W - 90), 12, y + 16);
-  doc.setFontSize(10); doc.setTextColor(...GREY); doc.text('NET ACCOUNT P/L', W - 70, y);
-  doc.setFontSize(20); doc.setTextColor(...pc(s.net)); doc.text(L1(U(s.net, true)), W - 70, y + 9);
+  if (OPT()) {
+    doc.setFontSize(10); doc.setTextColor(...GREY); doc.text('WIN RATE', W - 70, y);
+    doc.setFontSize(20); doc.setTextColor(...BLACK); doc.text(L1(pct(o.winRate) + '  (' + o.wins + ' / ' + o.n + ')'), W - 70, y + 9);
+  } else {
+    doc.setFontSize(10); doc.setTextColor(...GREY); doc.text('NET ACCOUNT P/L', W - 70, y);
+    doc.setFontSize(20); doc.setTextColor(...pc(s.net)); doc.text(L1(U(s.net, true)), W - 70, y + 9);
+  }
   y += 26;
   // chart
   if (s.curve.length) {
@@ -670,11 +698,15 @@ function pdfReport() {
   body.push(sec('Summary - every number with its math'));
   body.push(kvSpan('Options realized', o.total, U(o.grossWin, true) + ' wins ' + P(o.grossLoss) + ' losses (' + o.n + ' trades)'));
   body.push(kvSpan('Options open', s.openOptPl, s.openOpt.map(x => x.label + ' ' + x.math).join('; ') || 'none'));
+  if (OPT()) {
+    body.push(kvSpan('OPTIONS P/L', s.optTotal, sumText([o.total, s.openOptPl]) + ' (realized + open)'));
+  } else {
   body.push(kvSpan('Stocks / ETFs realized', s.stockRealized, U(s.stk.total, true) + ' matched ' + P(s.schwabYtdTotal) + ' Schwab P/L YTD (buys older than the file)'));
   body.push(kvSpan('Stocks / ETFs open', s.openStkPl, s.openStk.map(x => x.label + ' ' + x.math).join('; ') || 'none'));
   body.push(kvSpan('Dividends & interest', s.incomeTotal, s.income.length + ' payments'));
   body.push(kvSpan('Fees & commissions', s.feesTotal, s.fees.length ? s.fees.length + ' cash rows' : 'none listed in this export'));
   body.push(kvSpan('NET ACCOUNT P/L', s.net, sumText([o.total, s.openOptPl, s.stockRealized, s.openStkPl, s.incomeTotal, s.feesTotal])));
+  }
   body.push(sec('Options statistics'));
   [['Win rate', pct(o.winRate) + '  (' + o.wins + ' / ' + o.n + ')'], ['Profit factor', Number.isFinite(o.pf) ? o.pf.toFixed(2) + '  (' + U(o.grossWin) + ' / ' + U(-o.grossLoss) + ')' : '-'],
     ['Avg win / avg loss', U(o.avgWin, true) + ' / ' + U(o.avgLoss, true)], ['Expectancy per trade', U(o.expectancy, true) + '  (' + U(o.total, true) + ' / ' + o.n + ')'],
@@ -690,16 +722,17 @@ function pdfReport() {
   body.push(sec('Closed option trades (FIFO)'));
   body.push(['Closed', 'Opened', 'Contract', 'Strategy', 'Qty', 'Open', 'Close', { content: 'P/L', styles: { halign: 'right' } }, 'Worked math'].map(t => typeof t === 'string' ? { content: t, styles: { fontStyle: 'bold', textColor: NAVY } } : Object.assign(t, { styles: Object.assign(t.styles, { fontStyle: 'bold', textColor: NAVY }) })));
   s.optTrades.slice().reverse().forEach(c => body.push([D(c.closeTime) + (c.how === 'expired' ? ' exp' : ''), D(c.openTime), L1(c.label), L1(c.strat), String(c.qty), TS.px(c.openPrice), TS.px(c.closePrice), plCell(c.pl), L1(c.math)]));
-  if (s.openOpt.length || s.openStk.length) {
+  const openRows = OPT() ? s.openOpt : s.openOpt.concat(s.openStk);
+  if (openRows.length) {
     body.push(sec('Open positions (latest statement marks)'));
-    s.openOpt.concat(s.openStk).forEach(x => body.push([{ content: L1(x.label), colSpan: 2 }, L1(x.strat), String(x.qty), TS.px(x.price), TS.px(x.mark), { content: L1(U(x.value)) }, plCell(x.pl), L1(x.math)]));
+    openRows.forEach(x => body.push([{ content: L1(x.label), colSpan: 2 }, L1(x.strat), String(x.qty), TS.px(x.price), TS.px(x.mark), { content: L1(U(x.value)) }, plCell(x.pl), L1(x.math)]));
   }
-  if (s.stkTrades.length || s.schwabYtd.length) {
+  if (!OPT() && (s.stkTrades.length || s.schwabYtd.length)) {
     body.push(sec('Stocks & ETFs closed'));
     s.stkTrades.forEach(c => body.push([D(c.closeTime), { content: L1(c.symbol), colSpan: 2 }, String(c.qty), { content: '', colSpan: 3 }, plCell(c.pl), L1(c.math)]));
     s.schwabYtd.forEach(x => body.push([D(x.lastTime), { content: L1(x.symbol), colSpan: 2 }, String(x.qty), { content: L1('proceeds ' + U(x.proceeds)), colSpan: 3 }, plCell(x.ytd), L1('buy cost not in the file -> Schwab P/L YTD (' + D(x.asOf) + ')')]));
   }
-  if (s.income.length) {
+  if (!OPT() && s.income.length) {
     body.push(sec('Dividends & interest'));
     const m = new Map(); s.income.forEach(i => { if (!m.has(i.symbol)) m.set(i.symbol, { n: 0, t: 0 }); const g = m.get(i.symbol); g.n++; g.t += i.amount; });
     [...m.entries()].sort((a, b) => b[1].t - a[1].t).forEach(([k, g]) => body.push([{ content: L1(k), colSpan: 3, styles: { fontStyle: 'bold' } }, { content: g.n + ' payments', colSpan: 4 }, plCell(g.t), '']));
@@ -729,7 +762,7 @@ function pdfReport() {
       doc.text(L1('© 2026 Jachbit. All rights reserved. May not be copied or shared without express written consent of the publisher.  linktr.ee/jachbit'), W / 2, H - 7, { align: 'center' });
     }
   });
-  doc.save('FOCUS_TradeSummary_' + fileTag() + '_' + stamp() + '.pdf');
+  doc.save('FOCUS_TradeSummary_' + fileTag() + (OPT() ? '_Options' : '') + '_' + stamp() + '.pdf');
 }
 
 // ---------- header clock + GoatCounter (public Pages URL only) ----------
@@ -756,6 +789,7 @@ $('btnRename').addEventListener('click', renameAccount);
 $('btnDelete').addEventListener('click', deleteAccount);
 $('fileIn').addEventListener('change', e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) importFiles(f); });
 $('restoreIn').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) restore(f); });
+$('viewSeg').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (!b) return; store.view = b.dataset.v; save(); refresh(); });
 $('periodSel').addEventListener('change', e => { store.period = e.target.value; save(); refresh(); });
 $('fromIn').addEventListener('change', e => { store.from = e.target.value; save(); refresh(); });
 $('toIn').addEventListener('change', e => { store.to = e.target.value; save(); refresh(); });
